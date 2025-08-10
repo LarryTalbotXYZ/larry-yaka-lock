@@ -43,6 +43,11 @@ interface IVotingEscrow {
 
     function checkpoint() external;
     function deposit_for(uint tokenId, uint value) external;
+    function increase_unlock_time(uint tokenId, uint unlock_time) external;
+    function split(uint[] memory amounts, uint tokenId) external;
+    function merge(uint _from, uint _to) external;
+    function canSplit() external view returns (bool);
+    function tokenId() external view returns (uint);
 
     function balanceOfNFT(uint _id) external view returns (uint);
     function balanceOfNFTAt(uint _tokenId, uint _t) external view returns (uint);
