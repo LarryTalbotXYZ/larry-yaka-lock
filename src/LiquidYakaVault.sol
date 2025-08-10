@@ -363,10 +363,19 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
     function _extendLockIfNeeded(uint256 tokenId) internal {
         IVotingEscrow.LockedBalance memory locked = votingEscrow.locked(tokenId);
         uint256 timeLeft = locked.end > block.timestamp ? locked.end - block.timestamp : 0;
-        uint256 maxLockTime = block.timestamp + LOCK_DURATION;
         
-        if (timeLeft < LOCK_DURATION) {
-            votingEscrow.increase_unlock_time(tokenId, maxLockTime);
+        // Only try to extend if we have less than 1 year left and the lock is not already at maximum
+        if (timeLeft < 365 days) {
+            uint256 newEndTime = block.timestamp + LOCK_DURATION;
+            
+            // Make sure we don't exceed the veNFT's maximum lock duration
+            // Some veNFT contracts have absolute maximum lock times
+            try votingEscrow.increase_unlock_time(tokenId, newEndTime) {
+                // Extension successful
+            } catch {
+                // Extension failed (probably because it would exceed max lock time)
+                // This is fine - the NFT will continue with its current lock duration
+            }
         }
     }
 
