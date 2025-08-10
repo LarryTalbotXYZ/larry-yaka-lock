@@ -396,9 +396,6 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
         
         _resetNFTIfNeeded(mainNFT);
         
-        // Get NFTs owned before split
-        uint256[] memory nftsBefore = _getOwnedNFTs();
-        
         uint256 keepAmount = mainAmount - yakaAmount;
         uint256 withdrawAmount = yakaAmount;
         
@@ -407,126 +404,80 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
         amounts[0] = keepAmount;    // Weight for keep portion
         amounts[1] = withdrawAmount; // Weight for withdraw portion
         
-        uint256 splitNFT = mainNFT;
+        uint256 originalNFT = mainNFT;
+        
+        // Execute the split - this destroys originalNFT and creates 2 new ones
         votingEscrow.split(amounts, mainNFT);
         
-        // Get new NFTs by comparing before/after
-        uint256[] memory newNFTs = _getNewNFTsAfterSplit(nftsBefore);
-        require(newNFTs.length == 2, "Split should create exactly 2 NFTs");
+        // After split, the original NFT is destroyed and we don't own it anymore
+        // We need to find which of the newly created NFTs we now own
+        // The split function creates NFTs with sequential IDs, typically the next available IDs
         
+        // Strategy: Check a reasonable range of recent NFT IDs to find our new ones
         uint256 withdrawNFT = 0;
         uint256 newMainNFT = 0;
+        uint256 foundCount = 0;
         
-        // Find the NFT that matches withdrawal amount with tolerance
-        for (uint256 i = 0; i < newNFTs.length; i++) {
-            IVotingEscrow.LockedBalance memory nftLocked = votingEscrow.locked(newNFTs[i]);
-            uint256 nftAmount = uint256(int256(nftLocked.amount));
-            
-            // Use tolerance for rounding differences (0.1%)
-            if (nftAmount >= withdrawAmount * 999 / 1000 && nftAmount <= withdrawAmount * 1001 / 1000) {
-                withdrawNFT = newNFTs[i];
-            } else if (nftAmount >= keepAmount * 999 / 1000 && nftAmount <= keepAmount * 1001 / 1000) {
-                newMainNFT = newNFTs[i];
+        // Check the last 20 NFT IDs (reasonable range for finding our split results)
+        // We expect exactly 2 NFTs that we own after the split
+        for (uint256 i = originalNFT + 1; i <= originalNFT + 20 && foundCount < 2; i++) {
+            try votingEscrow.ownerOf(i) returns (address owner) {
+                if (owner == address(this)) {
+                    // This is one of our new NFTs
+                    IVotingEscrow.LockedBalance memory nftLocked = votingEscrow.locked(i);
+                    uint256 nftAmount = uint256(int256(nftLocked.amount));
+                    
+                    // Determine if this is the withdrawal NFT or the keep NFT
+                    // Use tolerance for rounding differences
+                    if (nftAmount >= withdrawAmount * 999 / 1000 && nftAmount <= withdrawAmount * 1001 / 1000) {
+                        withdrawNFT = i;
+                        foundCount++;
+                    } else if (nftAmount >= keepAmount * 999 / 1000 && nftAmount <= keepAmount * 1001 / 1000) {
+                        newMainNFT = i;
+                        foundCount++;
+                    }
+                }
+            } catch {
+                // NFT doesn't exist or can't read it, continue
+                continue;
             }
         }
         
-        require(withdrawNFT != 0, "Could not find matching withdrawal NFT");
-        require(newMainNFT != 0, "Could not find matching keep NFT");
+        require(withdrawNFT != 0, "Could not find withdrawal NFT after split");
+        require(newMainNFT != 0, "Could not find keep NFT after split");
         
-        // Verify NFT amounts before assignment
-        IVotingEscrow.LockedBalance memory withdrawLocked = votingEscrow.locked(withdrawNFT);
-        IVotingEscrow.LockedBalance memory keepLocked = votingEscrow.locked(newMainNFT);
-        uint256 withdrawNFTAmount = uint256(int256(withdrawLocked.amount));
-        uint256 keepNFTAmount = uint256(int256(keepLocked.amount));
-        
-        require(withdrawNFTAmount <= yakaAmount * 1001 / 1000, "Withdraw NFT amount too large");
-        require(withdrawNFTAmount >= yakaAmount * 999 / 1000, "Withdraw NFT amount too small");
-        
+        // Update our main NFT reference
         mainNFT = newMainNFT;
         _extendLockIfNeeded(mainNFT);
         _reVoteAfterSplit();
         
-        emit NFTSplit(splitNFT, newNFTs);
+        // Create array for event
+        uint256[] memory resultNFTs = new uint256[](2);
+        resultNFTs[0] = newMainNFT;
+        resultNFTs[1] = withdrawNFT;
+        
+        emit NFTSplit(originalNFT, resultNFTs);
         return withdrawNFT;
     }
 
 
     function _getOwnedNFTs() internal view returns (uint256[] memory) {
-        // For this vault, we typically only own 1-2 NFTs (mainNFT + possibly temp split NFTs)
-        // But we need to be safe against gas DoS if somehow we own more or if tokenId is very high
-        
-        uint256 maxTokenId = votingEscrow.tokenId();
-        uint256 maxCheck = maxTokenId > 10000 ? 10000 : maxTokenId; // Cap at 10k to prevent gas DoS
-        
-        uint256 count = 0;
-        
-        // First pass: count owned NFTs (with gas limit)
-        for (uint256 i = 1; i <= maxCheck; i++) {
-            try votingEscrow.ownerOf(i) returns (address owner) {
+        // Simple approach: we only track mainNFT in this vault design
+        // This is much more efficient and reliable than scanning
+        if (mainNFT != 0) {
+            try votingEscrow.ownerOf(mainNFT) returns (address owner) {
                 if (owner == address(this)) {
-                    count++;
+                    uint256[] memory ownedNFTs = new uint256[](1);
+                    ownedNFTs[0] = mainNFT;
+                    return ownedNFTs;
                 }
-            } catch {
-                continue;
-            }
+            } catch {}
         }
         
-        // Second pass: collect owned NFTs
-        uint256[] memory ownedNFTs = new uint256[](count);
-        uint256 index = 0;
-        
-        for (uint256 i = 1; i <= maxCheck && index < count; i++) {
-            try votingEscrow.ownerOf(i) returns (address owner) {
-                if (owner == address(this)) {
-                    ownedNFTs[index] = i;
-                    index++;
-                }
-            } catch {
-                continue;
-            }
-        }
-        
-        return ownedNFTs;
+        // Return empty array if no main NFT or not owned
+        return new uint256[](0);
     }
     
-    function _getNewNFTsAfterSplit(uint256[] memory nftsBefore) internal view returns (uint256[] memory) {
-        uint256[] memory nftsAfter = _getOwnedNFTs();
-        
-        // Find NFTs that are in nftsAfter but not in nftsBefore
-        uint256 newCount = 0;
-        
-        for (uint256 i = 0; i < nftsAfter.length; i++) {
-            bool isNew = true;
-            for (uint256 j = 0; j < nftsBefore.length; j++) {
-                if (nftsAfter[i] == nftsBefore[j]) {
-                    isNew = false;
-                    break;
-                }
-            }
-            if (isNew) {
-                newCount++;
-            }
-        }
-        
-        uint256[] memory newNFTs = new uint256[](newCount);
-        uint256 index = 0;
-        
-        for (uint256 i = 0; i < nftsAfter.length; i++) {
-            bool isNew = true;
-            for (uint256 j = 0; j < nftsBefore.length; j++) {
-                if (nftsAfter[i] == nftsBefore[j]) {
-                    isNew = false;
-                    break;
-                }
-            }
-            if (isNew) {
-                newNFTs[index] = nftsAfter[i];
-                index++;
-            }
-        }
-        
-        return newNFTs;
-    }
 
     function _resetNFTIfNeeded(uint256 tokenId) internal {
         if (votingEscrow.voted(tokenId) || votingEscrow.attachments(tokenId) > 0) {
