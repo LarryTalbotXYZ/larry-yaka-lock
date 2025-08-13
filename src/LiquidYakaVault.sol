@@ -123,6 +123,7 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
             votingEscrow.transferFrom(msg.sender, address(this), tokenId);
             _resetNFTIfNeeded(mainNFT);
             votingEscrow.merge(tokenId, mainNFT);
+            _reVoteAfterSplit(); // Re-apply voting allocation after merge
         }
         
         liquidToken.mint(msg.sender, liquidTokensToMint);
