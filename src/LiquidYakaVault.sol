@@ -119,10 +119,12 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
         if (mainNFT == 0) {
             votingEscrow.transferFrom(msg.sender, address(this), tokenId);
             mainNFT = tokenId;
+            _extendLockIfNeeded(mainNFT); // Extend to max voting power
         } else {
             votingEscrow.transferFrom(msg.sender, address(this), tokenId);
             _resetNFTIfNeeded(mainNFT);
             votingEscrow.merge(tokenId, mainNFT);
+            _extendLockIfNeeded(mainNFT); // Extend to max voting power after merge
             _reVoteAfterSplit(); // Re-apply voting allocation after merge
         }
         
@@ -173,6 +175,7 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
         require(mainNFT != 0, "No main NFT to vote with");
         require(votingEscrow.balanceOfNFT(mainNFT) > 0, "Main NFT has no balance");
         
+        _extendLockIfNeeded(mainNFT); // Extend to max voting power before voting
         voter.vote(mainNFT, pools, weights);
         
         _saveLastVote(pools, weights);
@@ -200,6 +203,7 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
         require(lastVotePools.length > 0, "No previous vote to restore");
         require(mainNFT != 0, "No main NFT");
         
+        _extendLockIfNeeded(mainNFT); // Extend to max voting power before revoting
         voter.vote(mainNFT, lastVotePools, lastVoteWeights);
         emit VoteExecuted(lastVotePools, lastVoteWeights);
     }
@@ -365,14 +369,15 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
         IVotingEscrow.LockedBalance memory locked = votingEscrow.locked(tokenId);
         uint256 timeLeft = locked.end > block.timestamp ? locked.end - block.timestamp : 0;
         
-        // Only try to extend if we have less than 1 year left and the lock is not already at maximum
-        if (timeLeft < 365 days) {
+        // Always extend to maximum 2 years for optimal voting power
+        // Only skip if already at or very close to max duration (within 1 day)
+        if (timeLeft < LOCK_DURATION - 1 days) {
             uint256 newEndTime = block.timestamp + LOCK_DURATION;
             
             // Make sure we don't exceed the veNFT's maximum lock duration
             // Some veNFT contracts have absolute maximum lock times
             try votingEscrow.increase_unlock_time(tokenId, newEndTime) {
-                // Extension successful
+                // Extension successful - now at maximum voting power
             } catch {
                 // Extension failed (probably because it would exceed max lock time)
                 // This is fine - the NFT will continue with its current lock duration
