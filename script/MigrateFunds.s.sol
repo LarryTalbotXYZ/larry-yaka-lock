@@ -6,8 +6,8 @@ import "../src/LiquidYakaVault.sol";
 
 contract MigrateFunds is Script {
     // Contract addresses
-    address constant OLD_VAULT = 0x2fB0DA76902E13810460A80045C3FC5170776543;
-    address constant NEW_VAULT = 0x9Ff8a56c9E393D0cC4093b15B70EcC67CfC577c6;
+    address constant OLD_VAULT = 0x9833F68daB132E432ac8Bca160f60b77af36A306; // Previous ultimate vault
+    address constant NEW_VAULT = 0x25184F590aAf61D41677ea3CD6Df009dEAEBBB13; // Current vault with fees
     
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");

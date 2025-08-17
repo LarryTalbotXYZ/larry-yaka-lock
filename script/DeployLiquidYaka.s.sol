@@ -8,8 +8,9 @@ import "../src/LiquidYakaVault.sol";
 contract DeployLiquidYaka is Script {
     // Mainnet addresses
     address constant YAKA = 0x51121BCAE92E302f19D06C193C95E1f7b81a444b;
-    address constant VE_YAKA = 0x86a247ef0fc244565bcab93936e867407ac81580;
+    address constant VE_YAKA = 0x86a247Ef0Fc244565BCab93936E867407ac81580;
     address constant VOTER_V3 = 0x36068f15f257896E03fb7EdbA3D18898d0ade809;
+    address constant REWARD_DISTRIBUTOR = 0xaC76B04F87ccbfb4ba01f76F34B9f1B770839ebe;
     
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -32,7 +33,9 @@ contract DeployLiquidYaka is Script {
             YAKA,
             VE_YAKA,
             VOTER_V3,
-            address(liquidToken)
+            REWARD_DISTRIBUTOR,
+            address(liquidToken),
+            deployer  // fee recipient
         );
         console.log("LiquidYakaVault deployed at:", address(vault));
         

@@ -14,7 +14,8 @@ contract ManageVaultAuth is Script {
     address constant OLD_VAULT_3 = 0x2fB0DA76902E13810460A80045C3FC5170776543; // Previous vault
     address constant OLD_VAULT_4 = 0x9Ff8a56c9E393D0cC4093b15B70EcC67CfC577c6; // Fixed vault
     address constant OLD_VAULT_5 = 0x12386fE7bd1b001a10635f5288dAde955788BD84; // Max voting power vault (old)
-    address constant ULTIMATE_VAULT = 0x9833F68daB132E432ac8Bca160f60b77af36A306; // Ultimate vault with max voting power
+    address constant OLD_VAULT_6 = 0x9833F68daB132E432ac8Bca160f60b77af36A306; // Ultimate vault with max voting power (old)
+    address constant CURRENT_VAULT = 0x25184F590aAf61D41677ea3CD6Df009dEAEBBB13; // Current vault with 5% fees
     
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -34,14 +35,16 @@ contract ManageVaultAuth is Script {
         bool oldVault3Auth = lyt.authorizedVaults(OLD_VAULT_3);
         bool oldVault4Auth = lyt.authorizedVaults(OLD_VAULT_4);
         bool oldVault5Auth = lyt.authorizedVaults(OLD_VAULT_5);
-        bool ultimateVaultAuth = lyt.authorizedVaults(ULTIMATE_VAULT);
+        bool oldVault6Auth = lyt.authorizedVaults(OLD_VAULT_6);
+        bool currentVaultAuth = lyt.authorizedVaults(CURRENT_VAULT);
         
         console.log("Old Vault 1 (0x6d5F...33): ", oldVault1Auth);
         console.log("Old Vault 2 (0xb452...CE): ", oldVault2Auth);
         console.log("Old Vault 3 (0x2fB0...43): ", oldVault3Auth);
         console.log("Old Vault 4 (0x9Ff8...c6): ", oldVault4Auth);
         console.log("Old Vault 5 (0x1238...84): ", oldVault5Auth);
-        console.log("Ultimate Vault (0x9833...06):", ultimateVaultAuth);
+        console.log("Old Vault 6 (0x9833...06): ", oldVault6Auth);
+        console.log("Current Vault (0x2518...13):", currentVaultAuth);
         console.log("");
         
         vm.startBroadcast(deployerPrivateKey);
@@ -87,13 +90,21 @@ contract ManageVaultAuth is Script {
             console.log("Old vault 5 already deauthorized");
         }
         
-        // Ensure ultimate vault is authorized
-        if (!ultimateVaultAuth) {
-            console.log("Authorizing ultimate vault...");
-            lyt.setVaultAuthorization(ULTIMATE_VAULT, true);
-            console.log("Ultimate vault authorized");
+        if (oldVault6Auth) {
+            console.log("Deauthorizing old vault 6 (ultimate)...");
+            lyt.setVaultAuthorization(OLD_VAULT_6, false);
+            console.log("Old vault 6 (ultimate) deauthorized");
         } else {
-            console.log("Ultimate vault already authorized");
+            console.log("Old vault 6 (ultimate) already deauthorized");
+        }
+        
+        // Ensure current vault is authorized
+        if (!currentVaultAuth) {
+            console.log("Authorizing current vault with fees...");
+            lyt.setVaultAuthorization(CURRENT_VAULT, true);
+            console.log("Current vault authorized");
+        } else {
+            console.log("Current vault already authorized");
         }
         
         vm.stopBroadcast();
@@ -106,14 +117,16 @@ contract ManageVaultAuth is Script {
         bool oldVault3AuthFinal = lyt.authorizedVaults(OLD_VAULT_3);
         bool oldVault4AuthFinal = lyt.authorizedVaults(OLD_VAULT_4);
         bool oldVault5AuthFinal = lyt.authorizedVaults(OLD_VAULT_5);
-        bool ultimateVaultAuthFinal = lyt.authorizedVaults(ULTIMATE_VAULT);
+        bool oldVault6AuthFinal = lyt.authorizedVaults(OLD_VAULT_6);
+        bool currentVaultAuthFinal = lyt.authorizedVaults(CURRENT_VAULT);
         
         console.log("Old Vault 1 (0x6d5F...33): ", oldVault1AuthFinal);
         console.log("Old Vault 2 (0xb452...CE): ", oldVault2AuthFinal);
         console.log("Old Vault 3 (0x2fB0...43): ", oldVault3AuthFinal);
         console.log("Old Vault 4 (0x9Ff8...c6): ", oldVault4AuthFinal);
         console.log("Old Vault 5 (0x1238...84): ", oldVault5AuthFinal);
-        console.log("Ultimate Vault (0x9833...06):", ultimateVaultAuthFinal);
+        console.log("Old Vault 6 (0x9833...06): ", oldVault6AuthFinal);
+        console.log("Current Vault (0x2518...13):", currentVaultAuthFinal);
         
         // Verification
         bool correctSetup = (
@@ -122,16 +135,17 @@ contract ManageVaultAuth is Script {
             !oldVault3AuthFinal &&
             !oldVault4AuthFinal &&
             !oldVault5AuthFinal &&
-            ultimateVaultAuthFinal
+            !oldVault6AuthFinal &&
+            currentVaultAuthFinal
         );
         
         console.log("");
         console.log("=== Security Check ===");
-        console.log("Only ultimate vault authorized:", correctSetup);
+        console.log("Only current vault authorized:", correctSetup);
         
         if (correctSetup) {
             console.log("SUCCESS: Vault authorizations are properly configured!");
-            console.log("Only the ultimate vault can mint/burn LYT tokens");
+            console.log("Only the current vault with fees can mint/burn LYT tokens");
         } else {
             console.log("WARNING: Authorization setup needs attention!");
             if (oldVault1AuthFinal) console.log("- Old vault 1 still authorized");
@@ -139,7 +153,8 @@ contract ManageVaultAuth is Script {
             if (oldVault3AuthFinal) console.log("- Old vault 3 still authorized");
             if (oldVault4AuthFinal) console.log("- Old vault 4 still authorized");
             if (oldVault5AuthFinal) console.log("- Old vault 5 still authorized");
-            if (!ultimateVaultAuthFinal) console.log("- Ultimate vault not authorized");
+            if (oldVault6AuthFinal) console.log("- Old vault 6 (ultimate) still authorized");
+            if (!currentVaultAuthFinal) console.log("- Current vault not authorized");
         }
     }
 }

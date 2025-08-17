@@ -10,9 +10,13 @@ contract DeployVaultOnly is Script {
     address constant YAKA = 0x51121BCAE92E302f19D06C193C95E1f7b81a444b;
     address constant VE_YAKA = 0x86a247Ef0Fc244565BCab93936E867407ac81580;
     address constant VOTER_V3 = 0x36068f15f257896E03fb7EdbA3D18898d0ade809;
+    address constant REWARD_DISTRIBUTOR = 0xaC76B04F87ccbfb4ba01f76F34B9f1B770839ebe;
     
     // Existing LiquidYakaToken 
     address constant EXISTING_LIQUID_TOKEN = 0xFEEc14a2E30999A84fF4D5750ffb6D3AEc681E79;
+    
+    // Fee recipient address (can be changed later by owner)
+    address constant FEE_RECIPIENT = 0x3af1789536d88D3dCf2e200aB0fF1B48F8012E41;
     
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -25,13 +29,17 @@ contract DeployVaultOnly is Script {
         
         vm.startBroadcast(deployerPrivateKey);
         
-        // Deploy new LiquidYakaVault with fixed lock extension logic
-        console.log("Deploying new LiquidYakaVault...");
+        // Deploy new LiquidYakaVault with fee system
+        console.log("Deploying new LiquidYakaVault with 5% fees...");
+        console.log("Fee recipient:", FEE_RECIPIENT);
+        
         LiquidYakaVault newVault = new LiquidYakaVault(
             YAKA,
             VE_YAKA,
             VOTER_V3,
-            EXISTING_LIQUID_TOKEN
+            REWARD_DISTRIBUTOR,
+            EXISTING_LIQUID_TOKEN,
+            FEE_RECIPIENT
         );
         console.log("New LiquidYakaVault deployed at:", address(newVault));
         
@@ -55,8 +63,11 @@ contract DeployVaultOnly is Script {
         console.log("=== New Vault Deployment Complete ===");
         console.log("LiquidYakaToken (LYT):", EXISTING_LIQUID_TOKEN, "(existing)");
         console.log("New LiquidYakaVault:", address(newVault));
+        console.log("Fee Recipient:", FEE_RECIPIENT);
+        console.log("Deposit Fee: 5%");
+        console.log("Withdrawal Fee: 5%");
         console.log("Old LiquidYakaVault:", oldVault, "(deauthorized)");
         console.log("");
-        console.log("Ready to test deposits with fixed lock extension logic!");
+        console.log("Ready to test deposits with 5% fee system!");
     }
 }

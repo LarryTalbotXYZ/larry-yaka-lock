@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./veYakainterface/IVotingEscrow.sol";
+import "./veYakainterface/IRewardsDistributor.sol";
 import "./LiquidYakaToken.sol";
 
 interface IVoter {
@@ -18,12 +19,19 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
     IERC20 public immutable yaka;
     IVotingEscrow public immutable votingEscrow;
     IVoter public immutable voter;
+    IRewardsDistributor public immutable rewardDistributor;
     LiquidYakaToken public immutable liquidToken;
     
     uint256 public mainNFT;
     
     uint256 public constant LOCK_DURATION = 2 * 365 * 24 * 60 * 60; // 2 years
     uint256 public minimumWithdrawal = 1e18; // Minimum 1 YAKA withdrawal (18 decimals)
+    
+    uint256 public constant DEPOSIT_FEE = 500; // 5% = 500 basis points
+    uint256 public constant WITHDRAWAL_FEE = 500; // 5% = 500 basis points
+    uint256 public constant FEE_DENOMINATOR = 10000; // 100% = 10000 basis points
+    
+    address public feeRecipient;
     
     address[] public lastVotePools;
     uint256[] public lastVoteWeights;
@@ -45,17 +53,24 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
     event ManualCompound(uint256 yakaAmount);
     event NFTSplit(uint256 indexed originalNFT, uint256[] newNFTs);
     event MinimumWithdrawalUpdated(uint256 oldMinimum, uint256 newMinimum);
+    event DepositFeeCollected(address indexed recipient, uint256 feeAmount);
+    event WithdrawalFeeCollected(address indexed recipient, uint256 feeAmount);
+    event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
 
     constructor(
         address _yaka,
         address _votingEscrow,
         address _voter,
-        address _liquidToken
+        address _rewardDistributor,
+        address _liquidToken,
+        address _feeRecipient
     ) Ownable(msg.sender) {
         yaka = IERC20(_yaka);
         votingEscrow = IVotingEscrow(_votingEscrow);
         voter = IVoter(_voter);
+        rewardDistributor = IRewardsDistributor(_rewardDistributor);
         liquidToken = LiquidYakaToken(_liquidToken);
+        feeRecipient = _feeRecipient;
         
         yaka.approve(_votingEscrow, type(uint256).max);
     }
@@ -93,9 +108,20 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
             _extendLockIfNeeded(mainNFT);
         }
         
-        liquidToken.mint(msg.sender, liquidTokensToMint);
+        // Calculate deposit fee in Liquid YAKA tokens
+        uint256 depositFee = (liquidTokensToMint * DEPOSIT_FEE) / FEE_DENOMINATOR;
+        uint256 netLiquidTokens = liquidTokensToMint - depositFee;
         
-        emit Deposit(msg.sender, amount, liquidTokensToMint);
+        // Mint net amount to user
+        liquidToken.mint(msg.sender, netLiquidTokens);
+        
+        // Send fee to fee recipient
+        if (depositFee > 0 && feeRecipient != address(0)) {
+            liquidToken.mint(feeRecipient, depositFee);
+            emit DepositFeeCollected(feeRecipient, depositFee);
+        }
+        
+        emit Deposit(msg.sender, amount, netLiquidTokens);
     }
 
     function depositNFT(uint256 tokenId) external nonReentrant whenDepositsEnabled {
@@ -128,22 +154,44 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
             _reVoteAfterSplit(); // Re-apply voting allocation after merge
         }
         
-        liquidToken.mint(msg.sender, liquidTokensToMint);
+        // Calculate deposit fee in Liquid YAKA tokens
+        uint256 depositFee = (liquidTokensToMint * DEPOSIT_FEE) / FEE_DENOMINATOR;
+        uint256 netLiquidTokens = liquidTokensToMint - depositFee;
         
-        emit DepositNFT(msg.sender, tokenId, liquidTokensToMint);
+        // Mint net amount to user
+        liquidToken.mint(msg.sender, netLiquidTokens);
+        
+        // Send fee to fee recipient
+        if (depositFee > 0 && feeRecipient != address(0)) {
+            liquidToken.mint(feeRecipient, depositFee);
+            emit DepositFeeCollected(feeRecipient, depositFee);
+        }
+        
+        emit DepositNFT(msg.sender, tokenId, netLiquidTokens);
     }
 
     function withdraw(uint256 liquidAmount) external nonReentrant whenWithdrawalsEnabled {
         require(liquidAmount > 0, "Amount must be > 0");
         require(liquidToken.balanceOf(msg.sender) >= liquidAmount, "Insufficient balance");
         
+        // Calculate withdrawal fee in Liquid YAKA tokens
+        uint256 withdrawalFee = (liquidAmount * WITHDRAWAL_FEE) / FEE_DENOMINATOR;
+        uint256 netLiquidAmount = liquidAmount - withdrawalFee;
+        
         uint256 totalLockedValue = getTotalLockedValue();
         uint256 currentSupply = liquidToken.totalSupply();
-        uint256 yakaToWithdraw = (liquidAmount * totalLockedValue) / currentSupply;
+        uint256 yakaToWithdraw = (netLiquidAmount * totalLockedValue) / currentSupply;
         
         require(yakaToWithdraw >= minimumWithdrawal, "Below minimum withdrawal");
         
+        // Burn user's liquid tokens
         liquidToken.burnFrom(msg.sender, liquidAmount);
+        
+        // Send fee to fee recipient
+        if (withdrawalFee > 0 && feeRecipient != address(0)) {
+            liquidToken.mint(feeRecipient, withdrawalFee);
+            emit WithdrawalFeeCollected(feeRecipient, withdrawalFee);
+        }
         
         uint256 nftToTransfer = _splitForWithdrawal(yakaToWithdraw);
         votingEscrow.transferFrom(address(this), msg.sender, nftToTransfer);
@@ -156,13 +204,24 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
         require(liquidToken.balanceOf(msg.sender) >= liquidAmount, "Insufficient balance");
         require(!votingEscrow.canSplit(), "Use withdraw() when splitting enabled");
         
+        // Calculate withdrawal fee in Liquid YAKA tokens
+        uint256 withdrawalFee = (liquidAmount * WITHDRAWAL_FEE) / FEE_DENOMINATOR;
+        uint256 netLiquidAmount = liquidAmount - withdrawalFee;
+        
         uint256 totalLockedValue = getTotalLockedValue();
         uint256 currentSupply = liquidToken.totalSupply();
-        uint256 yakaToWithdraw = (liquidAmount * totalLockedValue) / currentSupply;
+        uint256 yakaToWithdraw = (netLiquidAmount * totalLockedValue) / currentSupply;
         
         require(yakaToWithdraw >= minimumWithdrawal, "Below minimum withdrawal");
         
+        // Burn user's liquid tokens
         liquidToken.burnFrom(msg.sender, liquidAmount);
+        
+        // Send fee to fee recipient
+        if (withdrawalFee > 0 && feeRecipient != address(0)) {
+            liquidToken.mint(feeRecipient, withdrawalFee);
+            emit WithdrawalFeeCollected(feeRecipient, withdrawalFee);
+        }
         
         _withdrawYakaFromNFTs(yakaToWithdraw);
         yaka.transfer(msg.sender, yakaToWithdraw);
@@ -261,6 +320,42 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
         emit RewardsClaimed(1);
     }
 
+    function claimRebase() external onlyOwner {
+        require(mainNFT != 0, "No main NFT to claim from");
+        
+        uint256 yakaBalanceBefore = yaka.balanceOf(address(this));
+        rewardDistributor.claim(mainNFT);
+        uint256 yakaBalanceAfter = yaka.balanceOf(address(this));
+        
+        uint256 rebaseRewards = yakaBalanceAfter - yakaBalanceBefore;
+        emit RewardTokensWithdrawn(address(yaka), rebaseRewards);
+    }
+
+    function claimRebaseMany(uint256[] calldata tokenIds) external onlyOwner {
+        require(tokenIds.length > 0, "No token IDs provided");
+        
+        uint256 yakaBalanceBefore = yaka.balanceOf(address(this));
+        rewardDistributor.claim_many(tokenIds);
+        uint256 yakaBalanceAfter = yaka.balanceOf(address(this));
+        
+        uint256 rebaseRewards = yakaBalanceAfter - yakaBalanceBefore;
+        emit RewardTokensWithdrawn(address(yaka), rebaseRewards);
+    }
+
+    function claimRebaseForMainNFT() external onlyOwner {
+        require(mainNFT != 0, "No main NFT to claim from");
+        
+        uint256[] memory tokenIds = new uint256[](1);
+        tokenIds[0] = mainNFT;
+        
+        uint256 yakaBalanceBefore = yaka.balanceOf(address(this));
+        rewardDistributor.claim_many(tokenIds);
+        uint256 yakaBalanceAfter = yaka.balanceOf(address(this));
+        
+        uint256 rebaseRewards = yakaBalanceAfter - yakaBalanceBefore;
+        emit RewardTokensWithdrawn(address(yaka), rebaseRewards);
+    }
+
     function withdrawRewardTokens(address token, uint256 amount) external onlyOwner {
         require(token != address(yaka), "Cannot withdraw YAKA directly");
         require(token != address(liquidToken), "Cannot withdraw liquid tokens");
@@ -330,6 +425,27 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
         uint256 oldMinimum = minimumWithdrawal;
         minimumWithdrawal = newMinimum;
         emit MinimumWithdrawalUpdated(oldMinimum, newMinimum);
+    }
+
+    function setFeeRecipient(address newFeeRecipient) external onlyOwner {
+        require(newFeeRecipient != address(0), "Invalid fee recipient");
+        address oldRecipient = feeRecipient;
+        feeRecipient = newFeeRecipient;
+        emit FeeRecipientUpdated(oldRecipient, newFeeRecipient);
+    }
+
+    function getFeeInfo() external view returns (uint256 depositFee, uint256 withdrawalFee, uint256 denominator, address recipient) {
+        return (DEPOSIT_FEE, WITHDRAWAL_FEE, FEE_DENOMINATOR, feeRecipient);
+    }
+
+    function calculateDepositFee(uint256 liquidAmount) external pure returns (uint256 fee, uint256 netAmount) {
+        fee = (liquidAmount * DEPOSIT_FEE) / FEE_DENOMINATOR;
+        netAmount = liquidAmount - fee;
+    }
+
+    function calculateWithdrawalFee(uint256 liquidAmount) external pure returns (uint256 fee, uint256 netAmount) {
+        fee = (liquidAmount * WITHDRAWAL_FEE) / FEE_DENOMINATOR;
+        netAmount = liquidAmount - fee;
     }
 
     function getTotalLockedValue() public view returns (uint256) {
