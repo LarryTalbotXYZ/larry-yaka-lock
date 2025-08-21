@@ -535,34 +535,48 @@ contract LiquidYakaVault is ReentrancyGuard, Ownable {
         // We need to find which of the newly created NFTs we now own
         // The split function creates NFTs with sequential IDs, typically the next available IDs
         
-        // Strategy: Check a reasonable range of recent NFT IDs to find our new ones
+        // Strategy: Search in expanding ranges to efficiently find newly created NFTs
+        // Start near original NFT, then expand search if needed
         uint256 withdrawNFT = 0;
         uint256 newMainNFT = 0;
         uint256 foundCount = 0;
         
-        // Check the last 20 NFT IDs (reasonable range for finding our split results)
-        // We expect exactly 2 NFTs that we own after the split
-        for (uint256 i = originalNFT + 1; i <= originalNFT + 20 && foundCount < 2; i++) {
-            try votingEscrow.ownerOf(i) returns (address owner) {
-                if (owner == address(this)) {
-                    // This is one of our new NFTs
-                    IVotingEscrow.LockedBalance memory nftLocked = votingEscrow.locked(i);
-                    uint256 nftAmount = uint256(int256(nftLocked.amount));
-                    
-                    // Determine if this is the withdrawal NFT or the keep NFT
-                    // Use tolerance for rounding differences
-                    if (nftAmount >= withdrawAmount * 999 / 1000 && nftAmount <= withdrawAmount * 1001 / 1000) {
-                        withdrawNFT = i;
-                        foundCount++;
-                    } else if (nftAmount >= keepAmount * 999 / 1000 && nftAmount <= keepAmount * 1001 / 1000) {
-                        newMainNFT = i;
-                        foundCount++;
+        // Search in expanding ranges: 50, 200, 1000, then full range
+        uint256[] memory searchRanges = new uint256[](4);
+        searchRanges[0] = 50;
+        searchRanges[1] = 200;  
+        searchRanges[2] = 1000;
+        searchRanges[3] = 10000;
+        
+        for (uint256 rangeIdx = 0; rangeIdx < searchRanges.length && foundCount < 2; rangeIdx++) {
+            uint256 range = searchRanges[rangeIdx];
+            
+            // Search forward from originalNFT
+            for (uint256 i = originalNFT + 1; i <= originalNFT + range && foundCount < 2; i++) {
+                try votingEscrow.ownerOf(i) returns (address owner) {
+                    if (owner == address(this)) {
+                        // This is one of our new NFTs
+                        IVotingEscrow.LockedBalance memory nftLocked = votingEscrow.locked(i);
+                        uint256 nftAmount = uint256(int256(nftLocked.amount));
+                        
+                        // Determine if this is the withdrawal NFT or the keep NFT
+                        // Use tolerance for rounding differences
+                        if (nftAmount >= withdrawAmount * 999 / 1000 && nftAmount <= withdrawAmount * 1001 / 1000) {
+                            withdrawNFT = i;
+                            foundCount++;
+                        } else if (nftAmount >= keepAmount * 999 / 1000 && nftAmount <= keepAmount * 1001 / 1000) {
+                            newMainNFT = i;
+                            foundCount++;
+                        }
                     }
+                } catch {
+                    // NFT doesn't exist or can't read it, continue
+                    continue;
                 }
-            } catch {
-                // NFT doesn't exist or can't read it, continue
-                continue;
             }
+            
+            // If found both, break early
+            if (foundCount >= 2) break;
         }
         
         require(withdrawNFT != 0, "Could not find withdrawal NFT after split");

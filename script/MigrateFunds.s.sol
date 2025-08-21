@@ -6,8 +6,8 @@ import "../src/LiquidYakaVault.sol";
 
 contract MigrateFunds is Script {
     // Contract addresses
-    address constant OLD_VAULT = 0x9833F68daB132E432ac8Bca160f60b77af36A306; // Previous ultimate vault
-    address constant NEW_VAULT = 0x25184F590aAf61D41677ea3CD6Df009dEAEBBB13; // Current vault with fees
+    address constant OLD_VAULT = 0x25184F590aAf61D41677ea3CD6Df009dEAEBBB13; // Previous vault 
+    address constant NEW_VAULT = 0xa206090C1A07518E977B0942023ca190314b8934; // New vault with NFT search fix
     
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
